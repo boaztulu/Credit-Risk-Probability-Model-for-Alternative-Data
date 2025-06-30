@@ -1,79 +1,108 @@
-# 📈 Credit-Risk Probability Model for Alternative Data  
-*An End-to-End Pipeline for Building, Deploying & Automating a Credit-Scoring System*
+<!-- ============================================================= -->
+<!--  README  ✨ Credit-Risk Probability Model for Alternative Data -->
+<!-- ============================================================= -->
+
+<h1 align="center">💳&nbsp; Credit-Risk Probability Model <br/>for <i>Alternative Data</i> 🚀</h1>
+
+<p align="center">
+  <b>Bati Bank × e-Commerce BNPL Pilot</b><br/>
+  <em>From raw transactions → MLflow-versioned model → FastAPI micro-service</em>
+</p>
 
 ---
 
-## 🗂️ Project Overview
-Bati Bank is partnering with an e-commerce platform to launch a *Buy-Now-Pay-Later* (BNPL) service.  
-Our objective is to transform raw behavioral transaction data into:
+## 🏷️ <big><b>1&nbsp;·&nbsp;Business Context</b></big>  <sup>(“Credit Scoring Business Understanding”)</sup>
 
-1. **A risk-probability score** for each prospective customer.  
-2. **A credit scorecard** that maps risk probabilities onto an interpretable scale.  
-3. **Optimal loan amount & duration suggestions** that align with the bank’s risk appetite.
-
-The repository follows a strict MLOps-ready structure (`src/`, `tests/`, `Dockerfile`, CI workflow), ensuring reproducibility, automated testing, and seamless deployment.
+| ✅ Requirement | 🏛️ Basel II Take-away | 🛠️ What We Implement |
+|---------------|-----------------------|----------------------|
+| **Interpretability & Audit** | Risk estimates must be explainable and traceable. | Modular pipeline → EDA ▶︎ feature scripts ▶︎ MLflow runs ▶︎ FastAPI. |
+| **No labelled defaults** | e-Commerce data lacks true default tags. | Engineer RFM-based **proxy** label `is_high_risk`. |
+| **Model risk vs. performance** | Simple scorecards = easy validation; GBMs = AUC boost. | Train **LogReg** ⚖️ **GBM**, compare in MLflow, register champion. |
 
 ---
 
-## 📚 Credit Scoring Business Understanding
+## 📊 <big><b>2&nbsp;·&nbsp;Exploratory Data Analysis</b></big>  *(see `notebooks/1.0-eda.ipynb`)*
 
-### 1️⃣ Basel II & the Imperative of Interpretability 🔍  
-Basel II allows banks to employ *internal* models for Probability-of-Default (PD) estimation but demands **rigorous validation, documentation, and audit-readiness**.  
-Hence, our model must be:  
-
-| Requirement | Implication for the Project |
-|-------------|-----------------------------|
-| *Transparency* | Prefer algorithms whose decision logic can be articulated to regulators and senior risk managers. |
-| *Auditability* | Maintain complete documentation: feature definitions, data lineage, model assumptions, and validation evidence. |
-| *Controllability* | Enable easy sensitivity analysis so that risk officers can stress-test model outputs under adverse scenarios. |
-
-A logistic-regression scorecard, for example, satisfies these needs; a purely black-box model would **hinder regulatory approval** and erode institutional trust.
+| 🔍 Insight | 🔗 Evidence |
+|-----------|------------|
+| **Spend is ultra right-skewed** ( 80 % \< UGX 250 k ) | Log-histogram + summary stats |
+| **Three channels dominate** ( web, iOS, Android → 94 % ) | Interactive pie chart |
+| **Fraud is < 0.3 %** and voided same day | Grouped bar chart |
+| **Recency ⊖ Monetary** ρ ≈ –0.58 | Correlation heat-map |
 
 ---
 
-### 2️⃣ Proxy Default Variable: Necessity & Risks ⚠️  
-Because the dataset lacks an explicit “default” flag, we must engineer a **proxy target** (e.g., ≥90 days past due). This step is essential for supervised learning, yet it introduces three principal risks:
+## 🛠️ <big><b>3&nbsp;·&nbsp;Feature Engineering</b></big>
 
-* **Representation Risk** – The proxy may diverge from *true* default behaviour, leading to sub-optimal risk segmentation.  
-* **Bias & Misclassification Risk** – A mis-specified proxy can inflate *false positives* (rejecting creditworthy applicants) or *false negatives* (approving risky ones).  
-* **Regulatory Scrutiny Risk** – Supervisors may challenge the validity of decisions driven by a proxy; we must justify its economic rationale and statistical soundness.
-
-Mitigation strategies include periodic back-testing against realized defaults and transparent communication of proxy limitations to stakeholders.
+* `RFMAggregator` ➜ **one-row-per-CustomerId**  
+* Pipeline ➡️ `median-impute → StandardScaler → One-Hot`  
+* Unit tests in `tests/` ensure deterministic transforms.
 
 ---
 
-### 3️⃣ Simple vs. Complex Models: Trade-Offs in a Regulated Context ⚖️  
+## 🔐 <big><b>4&nbsp;·&nbsp;Proxy Target Engineering</b></big>
 
-| 🔑 Dimension | **Simple / Interpretable**<br>*Logistic Regression + Weight-of-Evidence* | **Complex / High-Performance**<br>*Gradient Boosting (GBM)* |
-|--------------|------------------------------------------------------------|-------------------------------------------------------------|
-| **Interpretability** | ★★★★★ Users, auditors, and customers can trace each coefficient to a risk factor. | ★☆☆☆☆ Requires post-hoc explainers (SHAP, LIME); still opaque to lay readers. |
-| **Predictive Power** | ★★★☆☆ Captures linear effects; limited interactions. | ★★★★★ Exploits non-linearities and high-order interactions, improving AUC / Gini. |
-| **Regulatory Burden** | Low — decades of acceptance in credit scoring practice. | High — demands extensive documentation, challenger models, and fairness analysis. |
-| **Operational Stability** | Robust to data drift; coefficients change gradually. | Sensitive to feature drift; needs tighter monitoring & recalibration. |
-| **Maintenance Cost** | Minimal — scorecard updates are straightforward. | Significant — hyper-parameter tuning, model-explainability pipeline, monitoring dashboards. |
-
-**Balanced Strategy 📝**  
-*Adopt the simplest model that meets performance thresholds.*  
-Deploy GBM only if it yields **material** gains (> ~3–5 pp AUC/Gini) *and* if explainability tooling can satisfy regulatory and ethical standards.
+1. Compute **R · F · M** features.  
+2. `KMeans(k=3)` on scaled RFM.  
+3. Cluster with lowest F & M ⇒ `is_high_risk = 1`.  
+4. Class balance ≈ **19.7 %** high-risk 🟥  
 
 ---
 
-> **Key Takeaway 💡** — Basel II governance, the uncertainty of proxy labels, and the heightened cost of model risk management favour *interpretable* solutions for initial production. Complex models remain valuable as challenger models or ensemble components once an explainability framework is in place.
+## 🎯 <big><b>5&nbsp;·&nbsp;Model Training & Tracking</b></big>
+
+| Step | Details |
+|------|---------|
+| **Algorithms** | LogisticRegression (**liblinear, balanced**) & GradientBoostingClassifier |
+| **Tuning** | `GridSearchCV` (scoring = ROC-AUC, cv = 5) |
+| **Metrics** | ROC-AUC · Accuracy · Precision · Recall · F1 |
+| **MLflow** | Each trial logs 🔑 params + 📈 metrics + artifacts. Best model tagged **`champion`**. |
 
 ---
 
-## 🏗️ Repository Structure (excerpt)
+## 🌐 <big><b>6&nbsp;·&nbsp;Model Serving</b></big>
 
-```text
+```mermaid
+graph LR
+  Browser[Client] -- REST --> FastAPI
+  FastAPI -- loads on startup --> MLflow[(Model Registry)]
+  FastAPI -- /predict --> ChampionModel
 credit-risk-model/
-├── data/
-│   ├── raw/              # 📥 original Xente transactions
-│   └── processed/        # 🛠️ model-ready features
-├── notebooks/
-│   └── 1.0-eda.ipynb     # 🔎 exploratory data analysis
+├── data/            📁 raw & processed
+├── notebooks/       🧪 Jupyter EDA
 ├── src/
-│   ├── data_processing.py # ⚙️ feature pipelines
-│   ├── train.py           # 🎯 model training
-│   └── api/               # 🌐 FastAPI service
-├── tests/                # ✅ unit tests
-└── .github/workflows/ci.yml  # 🤖 automated lint & test
+│   ├── data_processing.py   ⚙️  features
+│   ├── target_engineering.py⚙️  proxy label
+│   ├── train.py             🤖 training
+│   └── api/                 🌐 FastAPI app
+├── tests/           ✅ unit tests
+├── Dockerfile       🐳
+├── docker-compose.yml
+└── README.md        📜 you are here
+
+
+# 1⃣  Install deps
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2⃣  Feature engineering
+python -m src.data_processing \
+       --raw data/raw/transactions.csv \
+       --out data/processed/features.parquet
+
+# 3⃣  Build proxy labels
+python -m src.target_engineering \
+       --raw data/raw/transactions.csv \
+       --out data/processed/high_risk_labels.parquet
+
+# 4⃣  Merge & train
+python -m src.train --features data/processed/features_with_target.parquet
+
+# 5⃣  Serve champion model
+docker compose up --build
+# → open http://localhost:8000/docs 🚀
+
+
+
+
+> **Tip:** GitHub markdown renders `<big>` tags and emojis inline, providing the desired “font size” variation without breaking compatibility.
